@@ -1,0 +1,2577 @@
+<!DOCTYPE html>
+<html lang="en" data-theme-default="system">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Simba Copilot</title>
+<meta name="description" content="An autonomous onboarding agent for your codebase. It plans, executes, tests, fixes its own bugs, and cites every file it read.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#FBF7F3" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0A0908" media="(prefers-color-scheme: dark)">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gabarito:wght@500;600;700&family=Hanken+Grotesk:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+
+<style>
+/* ==========================================================================
+   SIMBA COPILOT
+   An autonomous onboarding agent for an unfamiliar codebase.
+
+   Stylesheet contents
+     1.  Design tokens (light)
+     2.  Design tokens (dark: system preference + explicit override)
+     3.  Base and reset
+     4.  Utilities
+     5.  Application shell
+     6.  Sidebar
+     7.  Top bar and the live-context strip
+     8.  Conversation stream and turns
+     9.  Routing trace
+     10. Cards: the shared container for every agent artefact
+     11. Plan and approval gate
+     12. Self-correcting test loop
+     13. Inline diff
+     14. Dependency graph / blast radius
+     15. Citations and confidence
+     16. Guardrails
+     17. Composer
+     18. Empty state
+     19. Responsive
+     20. Reduced motion and forced colours
+   ========================================================================== */
+
+/* -------------------------------------------------------------------------
+   1. Design tokens
+   Every colour in the interface resolves through these. Nothing below this
+   block hard-codes a colour, so the whole theme is one edit wide.
+   ---------------------------------------------------------------------- */
+:root {
+  /* surfaces, back to front */
+  --ground:       #FFFFFF;
+  --surface:      #FBF7F3;
+  --surface-2:    #F4EDE5;
+
+  /* borders */
+  --line:         #E7DCD0;
+  --line-strong:  #D6C5B4;
+
+  /* text, by descending emphasis */
+  --ink:          #1C1613;
+  --ink-2:        #6B5A4E;
+  --ink-3:        #9B8878;
+
+  /* brand */
+  --brown:        #8A5223;
+  --brown-deep:   #5E3714;
+  --brown-soft:   #F0E3D6;
+  --on-brown:     #FFFFFF;
+
+  /* semantic status */
+  --good:         #4A6B3D;
+  --warn:         #8A6A1F;
+
+  /* shape and depth */
+  --radius:       14px;
+  --radius-sm:    8px;
+  --radius-pill:  999px;
+  --shadow:       0 1px 2px rgb(48 30 16 / 6%), 0 8px 24px rgb(48 30 16 / 5%);
+
+  /* rhythm */
+  --gap-1: 4px;
+  --gap-2: 8px;
+  --gap-3: 12px;
+  --gap-4: 18px;
+  --gap-5: 26px;
+
+  /* type scale */
+  --fs-micro: 10.5px;
+  --fs-small: 11.5px;
+  --fs-meta:  12.5px;
+  --fs-body:  15px;
+
+  /* measure: the reading column, shared by stream, composer and empty state */
+  --measure: 720px;
+
+  /* motion, disabled wholesale in section 20 */
+  --t-fast: .15s;
+  --t-mid:  .22s;
+
+  color-scheme: light;
+}
+
+/* -------------------------------------------------------------------------
+   2. Dark tokens
+   Declared twice on purpose: once for the system preference (skipped when the
+   reader has explicitly chosen light) and once for an explicit dark override.
+   Shadows are re-tuned rather than reused, because a light shadow is invisible
+   against a dark ground.
+   ---------------------------------------------------------------------- */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground:      #0A0908;
+    --surface:     #141110;
+    --surface-2:   #1E1916;
+    --line:        #2B2320;
+    --line-strong: #3E332C;
+    --ink:         #F3EBE3;
+    --ink-2:       #B5A294;
+    --ink-3:       #7E6E62;
+    --brown:       #C4854A;
+    --brown-deep:  #E0A96D;
+    --brown-soft:  #251A12;
+    --on-brown:    #1A1108;
+    --good:        #8FB37C;
+    --warn:        #D2AC5C;
+    --shadow:      0 1px 2px rgb(0 0 0 / 50%), 0 10px 30px rgb(0 0 0 / 35%);
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --ground:      #0A0908;
+  --surface:     #141110;
+  --surface-2:   #1E1916;
+  --line:        #2B2320;
+  --line-strong: #3E332C;
+  --ink:         #F3EBE3;
+  --ink-2:       #B5A294;
+  --ink-3:       #7E6E62;
+  --brown:       #C4854A;
+  --brown-deep:  #E0A96D;
+  --brown-soft:  #251A12;
+  --on-brown:    #1A1108;
+  --good:        #8FB37C;
+  --warn:        #D2AC5C;
+  --shadow:      0 1px 2px rgb(0 0 0 / 50%), 0 10px 30px rgb(0 0 0 / 35%);
+  color-scheme: dark;
+}
+
+/* -------------------------------------------------------------------------
+   3. Base
+   ---------------------------------------------------------------------- */
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: "Hanken Grotesk", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-size: var(--fs-body);
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1, h2, h3 {
+  margin: 0;
+  font-family: Gabarito, "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+
+p { margin: 0 0 10px; }
+p:last-child { margin-bottom: 0; }
+
+button { font: inherit; color: inherit; }
+
+/* One focus treatment, applied once, never removed anywhere below. */
+:focus-visible {
+  outline: 2px solid var(--brown);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* -------------------------------------------------------------------------
+   4. Utilities
+   ---------------------------------------------------------------------- */
+.mono {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Available to assistive technology, absent from the visual layout. */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.grow { flex: 1; min-width: 0; }
+.spacer { flex: 1; }
+
+.ms {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: var(--fs-small);
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.code {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: var(--fs-meta);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 1px 5px;
+}
+
+.fade-in { animation: rise .32s cubic-bezier(.2, .7, .3, 1) both; }
+@keyframes rise {
+  from { opacity: 0; transform: translateY(7px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.spin {
+  width: 13px; height: 13px;
+  border: 2px solid var(--line-strong);
+  border-top-color: var(--brown);
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* -------------------------------------------------------------------------
+   5. Application shell
+   ---------------------------------------------------------------------- */
+.app {
+  display: grid;
+  grid-template-columns: 252px minmax(0, 1fr);
+  height: 100%;
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.scrim { display: none; }
+
+/* -------------------------------------------------------------------------
+   6. Sidebar
+   ---------------------------------------------------------------------- */
+.rail {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: var(--gap-4) var(--gap-4) var(--gap-3);
+}
+
+.brand-mark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 34px; height: 34px;
+  border-radius: 11px;
+  background: linear-gradient(150deg, var(--brown), var(--brown-deep));
+  color: var(--on-brown);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 22%);
+}
+/* Icon slots line their SVG up with the surrounding text. */
+[data-icon] { display: inline-grid; place-items: center; }
+
+.brand-name {
+  font-family: Gabarito, sans-serif;
+  font-weight: 700;
+  font-size: 19px;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.brand-sub {
+  margin-top: 3px;
+  font-size: var(--fs-micro);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.new-task {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2);
+  margin: 0 var(--gap-4) var(--gap-3);
+  padding: 9px var(--gap-3);
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--ground);
+  font-weight: 600;
+  font-size: 13.5px;
+  cursor: pointer;
+  transition: border-color var(--t-fast), background var(--t-fast);
+}
+.new-task:hover { border-color: var(--brown); background: var(--surface-2); }
+
+/* The indexed repository. States the scale of the graph the agent works from. */
+.repo {
+  margin: 0 var(--gap-3) 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-2);
+  font-size: var(--fs-small);
+  color: var(--ink-2);
+}
+.repo-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink);
+  font-weight: 600;
+  font-size: var(--fs-meta);
+}
+.repo-stat { display: flex; justify-content: space-between; margin-top: 5px; }
+.repo-stat dd { margin: 0; color: var(--ink); font-family: "JetBrains Mono", monospace; }
+.repo dl { margin: 0; }
+
+.rail-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: var(--gap-1) var(--gap-3) var(--gap-3); }
+
+.rail-group-label {
+  padding: 14px 6px 7px;
+  font-size: var(--fs-micro);
+  letter-spacing: .13em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.thread {
+  display: block;
+  width: 100%;
+  padding: var(--gap-2) 10px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: var(--ink-2);
+  font-size: 13.5px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.thread:hover { background: var(--surface-2); color: var(--ink); }
+.thread[aria-current="true"] {
+  background: var(--brown-soft);
+  color: var(--brown-deep);
+  font-weight: 600;
+}
+
+.rail-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-2);
+  padding: var(--gap-3) 16px;
+  border-top: 1px solid var(--line);
+}
+
+.who { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.who-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.avatar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 26px; height: 26px;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--surface-2);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.icon-btn {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 30px; height: 30px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.icon-btn:hover { background: var(--surface-2); color: var(--ink); border-color: var(--line); }
+
+/* -------------------------------------------------------------------------
+   7. Top bar and the live-context strip
+   The strip is the visible proof of environmental awareness: it is what the
+   agent already knows before the reader types anything.
+   ---------------------------------------------------------------------- */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: var(--gap-3) 22px;
+  border-bottom: 1px solid var(--line);
+  background: var(--ground);
+}
+
+.crumb {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.crumb strong { color: var(--ink); font-weight: 600; }
+
+.menu-btn { display: none; }
+
+.routing {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px 4px var(--gap-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  font-size: var(--fs-small);
+  color: var(--ink-2);
+}
+.routing-dot {
+  flex: none;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--good);
+}
+
+.ctx {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  padding: var(--gap-2) 22px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.ctx-label {
+  margin-right: 2px;
+  font-size: 10px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.ctx-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--ground);
+  font-size: var(--fs-small);
+  color: var(--ink-2);
+}
+.ctx-pill svg { flex: none; color: var(--ink-3); }
+.ctx-pill b { color: var(--ink); font-weight: 600; }
+.ctx-pill[data-tone="good"] b { color: var(--good); }
+.ctx-pill[data-tone="warn"] { border-color: color-mix(in srgb, var(--warn) 50%, var(--line)); }
+.ctx-pill[data-tone="warn"] b { color: var(--warn); }
+
+.ctx-toggle {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--brown);
+  font-size: var(--fs-small);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.ctx-note {
+  flex-basis: 100%;
+  max-width: var(--measure);
+  margin: 2px 0 0;
+  font-size: var(--fs-small);
+  color: var(--ink-2);
+}
+
+/* -------------------------------------------------------------------------
+   8. Conversation stream
+   ---------------------------------------------------------------------- */
+.stream { flex: 1; min-height: 0; overflow-y: auto; scroll-behavior: smooth; }
+
+.stream-inner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-5);
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding: 28px 20px var(--gap-2);
+}
+
+.turn { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 13px; }
+
+.turn-mark {
+  display: grid;
+  place-items: center;
+  width: 30px; height: 30px;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.turn[data-author="human"] .turn-mark {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+}
+.turn[data-author="agent"] .turn-mark {
+  background: linear-gradient(150deg, var(--brown), var(--brown-deep));
+  color: var(--on-brown);
+}
+
+.turn-body { min-width: 0; }
+
+.turn-who {
+  margin-bottom: 5px;
+  font-size: 11px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.stream-note {
+  max-width: var(--measure);
+  margin: var(--gap-2) auto 0;
+  padding: 0 20px;
+  font-size: var(--fs-small);
+  color: var(--ink-3);
+  text-align: center;
+}
+
+/* -------------------------------------------------------------------------
+   9. Routing trace
+   Always rendered, never collapsed: a disclosure nobody opens discloses
+   nothing.
+   ---------------------------------------------------------------------- */
+.trace {
+  margin-bottom: var(--gap-3);
+  padding: 10px var(--gap-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: var(--fs-meta);
+}
+
+.trace-head,
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2);
+  font-size: 11px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.trace-head svg, .card-head svg { flex: none; }
+
+.trace-rows { display: flex; flex-direction: column; gap: 6px; margin-top: var(--gap-2); }
+
+.trace-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+  color: var(--ink-2);
+}
+
+/* Model tier. The colour difference is backed by the text label, never alone. */
+.tier {
+  padding: 2px var(--gap-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: var(--fs-micro);
+  letter-spacing: .03em;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.tier[data-tier="nano"]  { border-color: color-mix(in srgb, var(--good) 45%, transparent); color: var(--good); }
+.tier[data-tier="super"] { border-color: color-mix(in srgb, var(--warn) 50%, transparent); color: var(--warn); }
+.tier[data-tier="ultra"] { border-color: var(--brown); background: var(--brown-soft); color: var(--brown); }
+.tier[data-tier="read"],
+.tier[data-tier="graph"] { border-style: dashed; }
+
+/* -------------------------------------------------------------------------
+   10. Cards
+   One container for every agent artefact, so a plan, a diff, a graph and a
+   citation list are visibly the same kind of object.
+   ---------------------------------------------------------------------- */
+.card {
+  margin-bottom: var(--gap-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.card-head {
+  padding: 10px 13px;
+  border-bottom: 1px solid var(--line);
+}
+
+.card-text { padding: 11px 13px; font-size: 13px; }
+
+/* The footer of a card: what the reader may do, and what it guarantees. */
+.gate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-2);
+  padding: 10px 13px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+}
+.gate-note { flex: 1; min-width: 150px; font-size: var(--fs-small); color: var(--ink-2); }
+
+.btn {
+  padding: 6px var(--gap-3);
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--ground);
+  font-size: var(--fs-meta);
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color var(--t-fast), background var(--t-fast);
+}
+.btn:hover:not(:disabled) { border-color: var(--brown); }
+.btn:disabled { opacity: .45; cursor: default; }
+.btn[data-variant="primary"] {
+  background: var(--brown);
+  border-color: var(--brown);
+  color: var(--on-brown);
+}
+.btn[data-variant="primary"]:hover:not(:disabled) {
+  background: var(--brown-deep);
+  border-color: var(--brown-deep);
+}
+
+.btn-sm {
+  padding: 2px 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: var(--ground);
+  font-size: 11px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.btn-sm:hover:not(:disabled) { border-color: var(--brown); color: var(--brown-deep); }
+.btn-sm:disabled { opacity: .5; cursor: default; }
+
+/* Terminal state of a card: the action was taken, or deliberately was not. */
+.outcome {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: var(--gap-2) 13px;
+  border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--good) 10%, transparent);
+  font-size: var(--fs-meta);
+  color: var(--good);
+}
+.outcome[data-kind="neutral"] { background: var(--surface-2); color: var(--ink-3); }
+
+/* -------------------------------------------------------------------------
+   11. Plan and approval gate
+   ---------------------------------------------------------------------- */
+.plan-steps { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+
+.plan-step {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  padding: var(--gap-2) 13px;
+  border-top: 1px solid var(--line);
+}
+.plan-step:first-child { border-top: 0; }
+
+.step-box {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 18px; height: 18px;
+  margin-top: 1px;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 6px;
+  color: transparent;
+  transition: background var(--t-mid), border-color var(--t-mid), color var(--t-mid);
+}
+.plan-step[data-state="running"] .step-box { border-color: var(--brown); background: var(--brown-soft); }
+.plan-step[data-state="done"]    .step-box { border-color: var(--good); background: var(--good); color: var(--ground); }
+.plan-step[data-state="dropped"] .step-box { border-style: dashed; }
+
+.step-title { font-size: 13px; color: var(--ink-2); }
+.plan-step[data-state="running"] .step-title { color: var(--ink); font-weight: 600; }
+.plan-step[data-state="done"]    .step-title { color: var(--ink); }
+.plan-step[data-state="dropped"] .step-title { color: var(--ink-3); text-decoration: line-through; }
+
+.step-detail {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--fs-small);
+  color: var(--ink-3);
+}
+
+.step-right { display: flex; align-items: center; gap: 7px; flex: none; }
+
+/* -------------------------------------------------------------------------
+   12. Self-correcting test loop
+   ---------------------------------------------------------------------- */
+.loop { background: var(--ground); border-top: 1px solid var(--line); }
+
+.loop-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  padding: var(--gap-2) 13px;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-meta);
+}
+.loop-row:last-child { border-bottom: 0; }
+
+.attempt {
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: var(--fs-micro);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.verdict { font-weight: 600; }
+.loop-row[data-kind="pass"]     .verdict { color: var(--good); }
+.loop-row[data-kind="fail"]     .verdict { color: var(--warn); }
+.loop-row[data-kind="diagnose"] .verdict,
+.loop-row[data-kind="patch"]    .verdict { color: var(--brown); }
+
+.log {
+  margin: 0;
+  padding: 9px 13px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: var(--fs-small);
+  line-height: 1.55;
+  color: var(--ink-2);
+  overflow-x: auto;
+}
+.log-fail { color: var(--warn); }
+.log-dim  { color: var(--ink-3); }
+
+/* -------------------------------------------------------------------------
+   13. Inline diff
+   Reviewed and applied in place. Nothing is ever copied out of the stream.
+   ---------------------------------------------------------------------- */
+.diff-file {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2);
+  padding: var(--gap-2) 13px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: var(--fs-small);
+  color: var(--ink-2);
+}
+.diff-file[data-discarded="true"] .diff-path { text-decoration: line-through; color: var(--ink-3); }
+
+.diff-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.diff-add { color: var(--good); }
+.diff-del { color: var(--warn); }
+
+.diff-body {
+  margin: 0;
+  background: var(--ground);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-x: auto;
+}
+
+.diff-line { display: block; padding: 0 13px; white-space: pre; color: var(--ink-2); }
+.diff-line[data-op="add"] { background: color-mix(in srgb, var(--good) 13%, transparent); color: var(--ink); }
+.diff-line[data-op="del"] { background: color-mix(in srgb, var(--warn) 13%, transparent); }
+
+/* -------------------------------------------------------------------------
+   14. Dependency graph / blast radius
+   ---------------------------------------------------------------------- */
+.graph-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 7px 13px;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-meta);
+}
+.graph-row:last-child { border-bottom: 0; }
+
+.graph-ref {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: var(--fs-small);
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.graph-ref b { color: var(--ink); font-weight: 500; }
+.graph-ref .at { color: var(--ink-3); }
+
+.tag {
+  padding: 2px var(--gap-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-micro);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.tag[data-tone="warn"]  { border-color: color-mix(in srgb, var(--warn) 55%, transparent); color: var(--warn); }
+.tag[data-tone="good"]  { border-color: color-mix(in srgb, var(--good) 45%, transparent); color: var(--good); }
+.tag[data-tone="brand"] { border-color: var(--brown); color: var(--brown); }
+
+/* -------------------------------------------------------------------------
+   15. Citations and confidence
+   ---------------------------------------------------------------------- */
+.source {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  width: 100%;
+  padding: 7px 13px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  color: var(--ink-2);
+  font-size: var(--fs-meta);
+  text-align: left;
+  cursor: pointer;
+}
+.source:last-of-type { border-bottom: 0; }
+.source:hover { background: var(--surface-2); color: var(--ink); }
+.source svg { color: var(--ink-3); }
+
+.source-path {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: var(--fs-small);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.source-path .at { color: var(--ink-3); }
+.source-why { font-size: 11px; color: var(--ink-3); white-space: nowrap; }
+
+.confidence {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 13px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.confidence b { color: var(--ink); font-weight: 600; }
+.confidence-reason { flex: 1; min-width: 160px; }
+
+.meter {
+  flex: none;
+  width: 74px; height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--line);
+  overflow: hidden;
+}
+.meter-fill { display: block; height: 100%; border-radius: inherit; background: var(--good); }
+.confidence[data-level="low"] .meter-fill,
+.confidence[data-level="medium"] .meter-fill { background: var(--warn); }
+
+/* -------------------------------------------------------------------------
+   16. Guardrails
+   A refusal is a first-class result, so it gets a first-class treatment.
+   ---------------------------------------------------------------------- */
+.card[data-kind="guard"] {
+  border-color: color-mix(in srgb, var(--warn) 55%, var(--line));
+  background: color-mix(in srgb, var(--warn) 8%, var(--surface));
+}
+.card[data-kind="guard"] .card-head {
+  color: var(--warn);
+  border-bottom-color: color-mix(in srgb, var(--warn) 30%, var(--line));
+}
+.guard-list { margin: 6px 0 0; padding-left: 19px; font-size: var(--fs-meta); color: var(--ink-2); }
+
+/* -------------------------------------------------------------------------
+   17. Composer
+   ---------------------------------------------------------------------- */
+.composer-wrap {
+  padding: 14px 20px calc(14px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--line);
+  background: var(--ground);
+}
+
+.composer {
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding: 10px 10px var(--gap-2) 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  transition: border-color var(--t-fast), background var(--t-fast);
+}
+.composer:focus-within { border-color: var(--brown); }
+.composer[data-dragging="true"] { border-color: var(--brown); background: var(--brown-soft); }
+
+.composer textarea {
+  width: 100%;
+  max-height: 150px;
+  border: 0;
+  background: none;
+  resize: none;
+  color: var(--ink);
+  font: inherit;
+  line-height: 1.5;
+  outline: none;
+}
+.composer textarea::placeholder { color: var(--ink-3); }
+
+.composer-row {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2);
+  margin-top: 6px;
+}
+
+.attachment {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2);
+  margin-bottom: var(--gap-2);
+  padding: 7px 10px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 10px;
+  background: var(--ground);
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.attachment[hidden] { display: none; }
+.attachment-name { font-family: "JetBrains Mono", ui-monospace, monospace; }
+
+.depth {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+}
+.depth button {
+  padding: 3px 10px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: none;
+  font-size: 12px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.depth button[aria-pressed="true"] {
+  background: var(--ground);
+  color: var(--brown-deep);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 8%);
+}
+
+.tools { display: flex; gap: 2px; }
+.tool {
+  display: grid;
+  place-items: center;
+  width: 28px; height: 28px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.tool:hover { background: var(--surface-2); border-color: var(--line); color: var(--brown); }
+.tool[aria-pressed="true"] {
+  background: var(--brown-soft);
+  border-color: var(--brown);
+  color: var(--brown-deep);
+}
+
+.send {
+  display: grid;
+  place-items: center;
+  width: 34px; height: 34px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--brown);
+  color: var(--on-brown);
+  cursor: pointer;
+  transition: background var(--t-fast), opacity var(--t-fast);
+}
+.send:hover:not(:disabled) { background: var(--brown-deep); }
+.send:disabled { opacity: .4; cursor: default; }
+
+.composer-hint {
+  max-width: var(--measure);
+  margin: var(--gap-2) auto 0;
+  font-size: var(--fs-small);
+  color: var(--ink-3);
+  text-align: center;
+}
+
+/* -------------------------------------------------------------------------
+   18. Empty state
+   ---------------------------------------------------------------------- */
+.welcome { max-width: var(--measure); margin: 0 auto; padding: 44px 20px 10px; }
+.welcome h1 { font-size: clamp(27px, 5vw, 34px); }
+.welcome p { max-width: 46ch; margin: 9px 0 0; color: var(--ink-2); }
+
+.starters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.starter {
+  padding: var(--gap-3) 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--t-fast), transform var(--t-fast);
+}
+.starter:hover { border-color: var(--brown); transform: translateY(-1px); }
+.starter span { display: block; margin-top: 3px; font-size: var(--fs-small); color: var(--ink-3); }
+
+/* -------------------------------------------------------------------------
+   19. Responsive
+   The sidebar becomes a drawer; every grid that would crush drops to two
+   columns instead of wrapping mid-word.
+   ---------------------------------------------------------------------- */
+@media (max-width: 760px) {
+  .app { grid-template-columns: minmax(0, 1fr); }
+
+  .rail {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 20;
+    width: 250px;
+    padding-top: env(safe-area-inset-top, 0px);
+    transform: translateX(-102%);
+    transition: transform var(--t-mid) ease;
+  }
+  .rail[data-open="true"] { transform: none; }
+
+  .scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 15;
+    background: rgb(20 12 6 / 45%);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .2s;
+  }
+  .scrim[data-on="true"] { opacity: 1; pointer-events: auto; }
+
+  .menu-btn { display: grid; }
+  .routing { display: none; }
+  .ctx-label { display: none; }
+
+  .topbar { padding: 10px 16px; padding-top: calc(10px + env(safe-area-inset-top, 0px)); }
+  .ctx { padding: 7px 16px; }
+  .stream-inner, .welcome, .composer-wrap { padding-left: 16px; padding-right: 16px; }
+
+  .trace-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .trace-row .ms { grid-column: 2; }
+  .plan-step { grid-template-columns: 18px minmax(0, 1fr); }
+  .plan-step .step-right { grid-column: 2; margin-top: var(--gap-1); }
+  .source { grid-template-columns: 16px minmax(0, 1fr); }
+  .source-why { grid-column: 2; }
+}
+
+/* -------------------------------------------------------------------------
+   20. Reduced motion and forced colours
+   Motion is a preference, so it is honoured everywhere at once — including
+   the streaming effect, which the script checks before animating.
+   ---------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+  .stream { scroll-behavior: auto; }
+}
+
+@media (forced-colors: active) {
+  .card, .trace, .composer, .ctx-pill, .tier, .tag { border: 1px solid CanvasText; }
+  .meter-fill { background: Highlight; }
+}
+</style>
+</head>
+<body>
+
+<a class="sr-only" href="#composer-input">Skip to the message box</a>
+
+<div class="app">
+
+  <!-- ===================================================================
+       Sidebar. Chrome is authored here; the thread list and the repository
+       figures are rendered from DATA so they exist in exactly one place.
+       =================================================================== -->
+  <aside class="rail" id="rail" data-open="false" aria-label="Tasks">
+    <div class="brand">
+      <div class="brand-mark" data-icon="sun" data-icon-size="20" data-icon-weight="1.7" aria-hidden="true"></div>
+      <div>
+        <div class="brand-name">Simba</div>
+        <div class="brand-sub">Onboarding Agent</div>
+      </div>
+    </div>
+
+    <button class="new-task" id="new-task" type="button">
+      <span data-icon="plus" data-icon-size="14" data-icon-weight="2.2" aria-hidden="true"></span>
+      New task
+    </button>
+
+    <section class="repo" aria-label="Indexed codebase">
+      <h2 class="repo-name">
+        <span data-icon="repo" data-icon-size="13" aria-hidden="true"></span>
+        <span id="repo-name">—</span>
+      </h2>
+      <dl id="repo-stats"></dl>
+    </section>
+
+    <nav class="rail-scroll" id="thread-list" aria-label="Recent tasks"></nav>
+
+    <div class="rail-foot">
+      <div class="who">
+        <span class="avatar" aria-hidden="true">CS</span>
+        <span class="who-name">Chaitanya · day 3</span>
+      </div>
+      <button class="icon-btn" id="theme-toggle" type="button" aria-label="Switch to dark theme">
+        <span id="theme-icon" aria-hidden="true"></span>
+      </button>
+    </div>
+  </aside>
+
+  <div class="scrim" id="scrim" data-on="false"></div>
+
+  <!-- ===================================================================
+       Main column
+       =================================================================== -->
+  <main class="main">
+
+    <header class="topbar">
+      <button class="icon-btn menu-btn" id="menu-toggle" type="button"
+              aria-label="Show tasks" aria-controls="rail" aria-expanded="false">
+        <span data-icon="menu" data-icon-size="18" aria-hidden="true"></span>
+      </button>
+      <h1 class="crumb" id="crumb"><strong>Add soft-delete to users</strong></h1>
+      <p class="routing">
+        <span class="routing-dot" aria-hidden="true"></span>
+        Routing on · 3 tiers
+      </p>
+    </header>
+
+    <!-- Environmental awareness, made visible: this is what the agent knows
+         before the reader types anything. -->
+    <section class="ctx" id="ctx" aria-label="Context Simba already has">
+      <h2 class="ctx-label">Simba can see</h2>
+    </section>
+
+    <!-- role="log" so assistive technology announces new turns as they arrive
+         without stealing focus from the composer. -->
+    <div class="stream" id="stream">
+      <div class="stream-inner" id="conversation" role="log" aria-live="polite" aria-relevant="additions"></div>
+      <p class="stream-note" id="stream-note">
+        Sample run. The agent loop is scripted here — the interface renders whatever plan,
+        trace, citations and confidence a real backend hands it.
+      </p>
+    </div>
+
+    <!-- ===============================================================
+         Composer
+         =============================================================== -->
+    <div class="composer-wrap">
+      <form class="composer" id="composer" data-dragging="false" novalidate>
+        <div class="attachment" id="attachment" hidden>
+          <span data-icon="image" data-icon-size="13" aria-hidden="true"></span>
+          <span class="attachment-name" id="attachment-name"></span>
+          <span class="ms">ready to read</span>
+          <span class="spacer"></span>
+          <button class="tool" id="attachment-clear" type="button" aria-label="Remove attachment">
+            <span data-icon="close" data-icon-size="12" data-icon-weight="2.4" aria-hidden="true"></span>
+          </button>
+        </div>
+
+        <label class="sr-only" for="composer-input">Describe a task for Simba</label>
+        <textarea id="composer-input" name="task" rows="1" autocomplete="off"
+                  placeholder="Describe a task — Simba will plan it first…"></textarea>
+
+        <div class="composer-row">
+          <div class="depth" id="depth" role="group" aria-label="How hard to think">
+            <button type="button" data-depth="auto" aria-pressed="true">Auto</button>
+            <button type="button" data-depth="fast" aria-pressed="false">Fast</button>
+            <button type="button" data-depth="deep" aria-pressed="false">Deep</button>
+          </div>
+
+          <div class="tools">
+            <button class="tool" id="tool-attach" type="button"
+                    aria-label="Attach a mockup or screenshot"
+                    title="Attach a mockup or screenshot — or drop one here">
+              <span data-icon="clip" aria-hidden="true"></span>
+            </button>
+            <button class="tool" id="tool-voice" type="button" aria-pressed="false"
+                    aria-label="Speak instead of typing" title="Speak instead of typing">
+              <span data-icon="mic" aria-hidden="true"></span>
+            </button>
+            <button class="tool" id="tool-terminal" type="button"
+                    aria-label="Pull in the last terminal error"
+                    title="Pull in the last terminal error">
+              <span data-icon="terminal" aria-hidden="true"></span>
+            </button>
+          </div>
+
+          <span class="spacer"></span>
+
+          <button class="send" id="send" type="submit" aria-label="Plan this task" disabled>
+            <span data-icon="arrow" data-icon-size="16" data-icon-weight="2.2" aria-hidden="true"></span>
+          </button>
+        </div>
+      </form>
+
+      <p class="composer-hint">
+        Simba plans before it acts, tests before it answers, and cites what it read.
+        Check anything that matters before you act on it.
+      </p>
+    </div>
+  </main>
+</div>
+
+<!-- Status messages for screen readers that the visual layout conveys through
+     motion and colour. -->
+<p class="sr-only" id="announcer" role="status" aria-live="polite"></p>
+
+<noscript>
+  <p style="max-width:60ch;margin:24px auto;padding:0 20px">
+    Simba's agent loop runs in the browser, so JavaScript is required to plan,
+    execute and review a task. The interface and its content are otherwise static.
+  </p>
+</noscript>
+
+<script>
+'use strict';
+
+/* ============================================================================
+   SIMBA COPILOT — application script
+
+   Design notes for the reader
+   ---------------------------
+   * One IIFE. Nothing is added to `window`.
+   * Every node is built with `el()` / `icon()`, which set `textContent` and
+     real attributes. `innerHTML` is never used, so a task description
+     containing markup is displayed as characters and cannot execute.
+   * All content lives in `DATA`. Renderers are pure functions of that data,
+     and the sample conversation on load is produced by the *same* agent
+     runtime a live task uses — so there is no second copy of the markup to
+     keep in sync.
+   * Every `await` in the runtime is a place a real backend call belongs.
+
+   Contents
+     1. Icons
+     2. Data
+     3. DOM helpers
+     4. Environment and storage
+     5. State
+     6. Renderers
+     7. Agent runtime
+     8. Interface wiring
+     9. Boot
+   ========================================================================= */
+(() => {
+
+  /* --------------------------------------------------------------------------
+     1. Icons
+     Path data only. `icon()` builds real SVG nodes through createElementNS.
+     ----------------------------------------------------------------------- */
+  const ICONS = {
+    sun:      ['M12 2.2v3M12 18.8v3M2.2 12h3M18.8 12h3M5.1 5.1l2.1 2.1M16.8 16.8l2.1 2.1M18.9 5.1l-2.1 2.1M7.2 16.8l-2.1 2.1', 'circle:12,12,4.4'],
+    moon:     ['M20 14.5A8.2 8.2 0 0 1 9.5 4a8.3 8.3 0 1 0 10.5 10.5z'],
+    plus:     ['M12 5v14M5 12h14'],
+    check:    ['M5 12.5l4.5 4.5L19 7'],
+    menu:     ['M4 7h16M4 12h16M4 17h16'],
+    close:    ['M6 6l12 12M18 6L6 18'],
+    arrow:    ['M5 12h13M12 5l7 7-7 7'],
+    repo:     ['M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z'],
+    clip:     ['M21 12.5l-8.5 8.5a5 5 0 0 1-7-7l8-8a3.4 3.4 0 0 1 4.8 4.8l-8 8a1.8 1.8 0 0 1-2.5-2.5l7.3-7.3'],
+    mic:      ['M5 11a7 7 0 0 0 14 0M12 18v3', 'rect:9,3,6,11,3'],
+    terminal: ['M4 5h16v14H4z', 'M8 10l2 2-2 2M13 14h4'],
+    image:    ['M4 5h16v14H4z', 'M8 13l3-3 3 4 2-2 2 3'],
+    trace:    ['M4 17l6-6 4 4 6-7'],
+    plan:     ['M9 6h11M9 12h11M9 18h11M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2'],
+    loop:     ['M21 12a9 9 0 1 1-3.2-6.9M21 4v5h-5'],
+    diff:     ['M6 3v12a3 3 0 0 0 3 3h9M15 15l3 3-3 3M18 21V9a3 3 0 0 0-3-3H6M9 9L6 6l3-3'],
+    graph:    ['M6.6 7.8l4 8.4M17.4 7.8l-4 8.4', 'circle:5,6,2.4', 'circle:19,6,2.4', 'circle:12,18,2.4'],
+    doc:      ['M4 5h11l5 5v9H4z', 'M15 5v5h5'],
+    eye:      ['M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z', 'circle:12,12,2.4'],
+    shield:   ['M12 3l8 4v6c0 4.4-3.4 7.4-8 8.4-4.6-1-8-4-8-8.4V7z', 'M12 9v4M12 16.2v.1'],
+    branch:   ['M6 8.6v6.8M8.6 6h4.6a2.2 2.2 0 0 1 2.2 2.2v.6', 'circle:6,6,2.6', 'circle:6,18,2.6', 'circle:18,8,2.6'],
+    lines:    ['M4 6h16M4 12h10M4 18h13'],
+    screen:   ['M4 5h16v12H4zM8 21h8'],
+    file:     ['M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z'],
+    tested:   ['M9 11l3 3L22 4', 'M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11'],
+  };
+
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+
+  /**
+   * Build an SVG icon from the ICONS table.
+   * @param {string} name  key in ICONS
+   * @param {number} [size=12]
+   * @param {number} [weight=2.2] stroke width
+   * @returns {SVGElement}
+   */
+  function icon(name, size = 12, weight = 2.2) {
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('width', size);
+    svg.setAttribute('height', size);
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', weight);
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('focusable', 'false');
+
+    for (const spec of ICONS[name] || []) {
+      if (spec.startsWith('circle:')) {
+        const [cx, cy, r] = spec.slice(7).split(',');
+        const c = document.createElementNS(SVG_NS, 'circle');
+        c.setAttribute('cx', cx); c.setAttribute('cy', cy); c.setAttribute('r', r);
+        svg.append(c);
+      } else if (spec.startsWith('rect:')) {
+        const [x, y, w, h, rx] = spec.slice(5).split(',');
+        const r = document.createElementNS(SVG_NS, 'rect');
+        r.setAttribute('x', x); r.setAttribute('y', y);
+        r.setAttribute('width', w); r.setAttribute('height', h);
+        if (rx) r.setAttribute('rx', rx);
+        svg.append(r);
+      } else {
+        const p = document.createElementNS(SVG_NS, 'path');
+        p.setAttribute('d', spec);
+        svg.append(p);
+      }
+    }
+    return svg;
+  }
+
+  /* --------------------------------------------------------------------------
+     2. Data
+     The single source of truth. A real backend would return exactly these
+     shapes; swapping it in means replacing section 7, not section 6.
+     ----------------------------------------------------------------------- */
+  const DATA = {
+    repo: {
+      name: 'acme/platform',
+      stats: [
+        ['Files in graph', '1,284'],
+        ['Symbols resolved', '18,907'],
+        ['Indexed', '2 min ago'],
+      ],
+    },
+
+    /* What the agent can see without being told. */
+    context: [
+      { icon: 'branch',  label: 'branch',      value: 'feat/soft-delete', tone: 'good' },
+      { icon: 'lines',   label: 'uncommitted', value: '3 files' },
+      { icon: 'screen',  label: 'terminal',    value: '2 errors', tone: 'warn' },
+      { icon: 'file',    label: 'open',        value: 'users.service.ts', mono: true },
+      { icon: 'tested',  label: 'tests',       value: '412 passing' },
+    ],
+
+    contextNote:
+      'Simba reads your live branch, uncommitted diff, recent terminal failures, open file ' +
+      'and test results on every turn. That is why you never paste a stack trace or explain ' +
+      'what you are working on.',
+
+    threads: [
+      { group: 'Today', items: ['Add soft-delete to users', 'What happens on signup?', 'Why does the nightly job fail?'] },
+      { group: 'This week', items: ['Modernize the legacy Cart class', 'Who owns the billing module?', 'Set up my local environment', 'Find dead code in /services'] },
+    ],
+
+    starters: [
+      ['Add a field end to end', 'Schema, migration, API, tests'],
+      ['Explain this failure', 'Your last terminal error is already loaded'],
+      ['What calls this function?', 'Straight from the dependency graph'],
+      ['Modernize a legacy class', 'With a rollback path'],
+    ],
+
+    /* The context the agent reports having read, before it plans. */
+    preflight: [
+      ['Live diff on `feat/soft-delete`', 'read', '3 files'],
+      ['Last 2 terminal failures', 'read', 'no paste needed'],
+      ['Dependency graph for the symbols you named', 'graph', '18,907 nodes'],
+    ],
+
+    /* One plan per depth setting. Depth is a real branch, not a label. */
+    plans: {
+      fast: {
+        estimate: '12 s',
+        steps: [
+          { title: 'Locate the symbol in the graph', detail: 'resolved across 1,284 files', tier: 'nano', ms: '210 ms' },
+          { title: 'Draft the change', detail: 'single file', tier: 'super', ms: '1.3 s' },
+          { title: 'Lint and parse-check the output', detail: 'deterministic — no model involved', tier: 'nano', ms: '90 ms' },
+        ],
+        runsTests: false,
+      },
+      auto: {
+        estimate: '34 s',
+        steps: [
+          { title: 'Classify the request', detail: 'multi-file change', tier: 'nano', ms: '170 ms' },
+          { title: 'Walk the dependency graph', detail: '23 references found', tier: 'nano', ms: '310 ms' },
+          { title: 'Plan and write the change', detail: '4 files', tier: 'ultra', ms: '6.4 s' },
+          { title: 'Run the suite, fix what breaks', detail: 'self-correcting', tier: 'ultra', ms: '18.6 s' },
+        ],
+        runsTests: true,
+      },
+      deep: {
+        estimate: '55 s',
+        steps: [
+          { title: 'Classify the request and check it against the ADRs', detail: 'docs/adr/', tier: 'nano', ms: '240 ms' },
+          { title: 'Walk every call site in the graph', detail: '23 references found', tier: 'nano', ms: '380 ms' },
+          { title: 'Reason through the approach and the rollback path', detail: 'weighed 3 options', tier: 'ultra', ms: '7.8 s' },
+          { title: 'Write the change', detail: '4 files', tier: 'super', ms: '2.6 s' },
+          { title: 'Extend the suite to cover the new branch', detail: '+3 cases', tier: 'super', ms: '2.1 s' },
+          { title: 'Run the suite, fix what breaks', detail: 'self-correcting', tier: 'ultra', ms: '18.6 s' },
+        ],
+        runsTests: true,
+      },
+    },
+
+    /* The self-correction loop. It fails first on purpose: a loop that only
+       ever passes proves nothing. */
+    testRun: [
+      { kind: 'fail', attempt: 'try 1', verdict: '2 failed', rest: '· 410 passed — `users.service.spec.ts`', ms: '7.1 s',
+        log: [
+          ['fail', '● UsersService › findById › returns null for a deleted user'],
+          ['', '  Expected: null'],
+          ['', "  Received: { id: 'u_204', email: 'ada@acme.io' }"],
+          ['dim', '  at src/users/users.service.ts:88'],
+        ] },
+      { kind: 'diagnose', attempt: 'read', verdict: 'Diagnosed', ms: '3.3 s',
+        rest: '— `findById` calls `findUnique` directly, so my `where` guard never ran on that path.' },
+      { kind: 'patch', attempt: 'patch', verdict: 'Fixed itself', ms: '1.9 s',
+        rest: '— routed `findById` through the same guarded builder as `findMany`.' },
+      { kind: 'pass', attempt: 'try 2', verdict: '412 passed', rest: '· 0 failed', ms: '6.3 s' },
+    ],
+
+    /* Proposed changes. Reviewed in place; nothing is written without a click. */
+    diff: {
+      fileCount: 4,
+      files: [
+        { path: 'src/users/users.service.ts', added: 9, removed: 2, hunk: [
+          ['ctx', '  private baseWhere() {'],
+          ['del', '-   return {};'],
+          ['add', '+   return { deletedAt: null };'],
+          ['ctx', '  }'],
+          ['ctx', ' '],
+          ['ctx', '  async findById(id: string) {'],
+          ['del', '-   return this.db.user.findUnique({ where: { id } });'],
+          ['add', '+   return this.db.user.findFirst({'],
+          ['add', '+     where: { id, ...this.baseWhere() },'],
+          ['add', '+   });'],
+          ['ctx', '  }'],
+        ] },
+        { path: 'prisma/schema.prisma', added: 1, removed: 0, hunk: [
+          ['ctx', 'model User {'],
+          ['add', '+  deletedAt DateTime?'],
+          ['ctx', '}'],
+        ] },
+        { path: 'src/api/admin.controller.ts', added: 3, removed: 1 },
+        { path: 'src/api/export.ts', added: 2, removed: 1 },
+      ],
+    },
+
+    /* Blast radius, resolved from the syntax tree. */
+    graph: {
+      total: 23,
+      rows: [
+        { file: 'users.service.ts',    symbol: 'findById',       at: ':88', tag: 'would have leaked', tone: 'warn' },
+        { file: 'admin.controller.ts', symbol: 'listAll',        at: ':42', tag: 'would have leaked', tone: 'warn' },
+        { file: 'export.ts',           symbol: 'dumpUsers',      at: ':17', tag: 'would have leaked', tone: 'warn' },
+        { file: 'auth.guard.ts',       symbol: 'resolveSession', at: ':64', tag: 'covered by tests',  tone: 'brand' },
+        { file: '12 more call sites',  symbol: '',               at: '',    tag: 'write-only, unaffected', tone: 'good' },
+      ],
+    },
+
+    /* Citations. Everything asserted above traces back to one of these. */
+    sources: [
+      { path: 'src/users/users.service.ts', at: ':60–104', why: 'the query layer' },
+      { path: 'prisma/schema.prisma',       at: ':12–31',  why: 'current shape of User' },
+      { path: 'docs/adr/0014-soft-delete.md', at: '',      why: 'team chose deletedAt', deepOnly: true },
+      { path: 'wiki / Data retention policy', at: '',      why: '30-day purge rule',    deepOnly: true },
+      { path: 'git log',                      at: ' · #4102', why: 'a prior attempt, reverted', deepOnly: true },
+    ],
+
+    /* Confidence is a claim about the *evidence*, so each level states its own
+       reason — including the reasons not to trust it. */
+    confidence: {
+      high: { level: 'high', percent: 92, label: 'High',
+        reason: 'I read the implementation directly, the graph resolved every call site, and your suite is green. An ADR already fixed the column name, so I did not have to guess it.' },
+      low: { level: 'low', percent: 46, label: 'Low',
+        reason: 'Fast mode skipped the ADR check and I did not run your tests. I read two files and matched a pattern. Treat this as a draft, not a verdict — re-run it in Deep before relying on it.' },
+    },
+
+    /* Refusal detail for a destructive request. */
+    guard: {
+      impact: [
+        '3 tables, roughly 41,200 rows',
+        'No migration currently reverses this',
+        'The most recent backup is 6 hours old',
+      ],
+    },
+
+    closing:
+      'One thing outside your ask: **ADR 0014 also requires a 30-day purge job**, which does not ' +
+      'exist yet. I did not build it. Want it as the next task?',
+  };
+
+  /** Requests that must never execute without an explicit, fresh confirmation. */
+  const DESTRUCTIVE = /\b(delete|drop|truncate|rm\s+-rf|force[-\s]?push|reset\s+--hard|wipe|purge)\b/i;
+  /** "soft-delete" is additive, so it is not the destructive sense of "delete". */
+  const NOT_DESTRUCTIVE = /soft[-\s]?delete/i;
+
+  const SAMPLE_TASK =
+    "I'm new here. Add a soft-delete flag to users and make sure nothing in the API returns deleted ones.";
+
+  /* --------------------------------------------------------------------------
+     3. DOM helpers
+     `el` is the only way nodes are created below. Because children are appended
+     as text nodes, untrusted input cannot become markup.
+     ----------------------------------------------------------------------- */
+
+  /**
+   * Create an element.
+   * @param {string} tag
+   * @param {Object} [props]  `class`, `text`, `data:{}`, `aria:{}`, or any attribute
+   * @param {Array<Node|string|null|false>} [children]
+   * @returns {HTMLElement}
+   */
+  function el(tag, props = {}, children = []) {
+    const node = document.createElement(tag);
+
+    for (const [key, value] of Object.entries(props)) {
+      if (value === null || value === undefined || value === false) continue;
+
+      if (key === 'text') { node.textContent = value; continue; }
+      if (key === 'class') { node.className = value; continue; }
+      if (key === 'data' || key === 'aria') {
+        const prefix = key === 'data' ? 'data-' : 'aria-';
+        for (const [k, v] of Object.entries(value)) {
+          if (v !== null && v !== undefined && v !== false) node.setAttribute(prefix + k, v);
+        }
+        continue;
+      }
+      if (key === 'on') {
+        for (const [evt, fn] of Object.entries(value)) node.addEventListener(evt, fn);
+        continue;
+      }
+      node.setAttribute(key, value === true ? '' : value);
+    }
+
+    for (const child of children.flat()) {
+      if (child === null || child === undefined || child === false) continue;
+      node.append(typeof child === 'string' ? document.createTextNode(child) : child);
+    }
+    return node;
+  }
+
+  /**
+   * Render a tiny, closed subset of inline markup as real nodes:
+   * `code` becomes <code>, **bold** becomes <strong>. Everything else stays
+   * literal text — there is no path from input to markup.
+   * @param {string} source
+   * @returns {DocumentFragment}
+   */
+  function rich(source) {
+    const frag = document.createDocumentFragment();
+    const pattern = /`([^`]+)`|\*\*([^*]+)\*\*/g;
+    let cursor = 0;
+    let match;
+
+    while ((match = pattern.exec(source)) !== null) {
+      if (match.index > cursor) frag.append(source.slice(cursor, match.index));
+      frag.append(match[1]
+        ? el('code', { class: 'code', text: match[1] })
+        : el('strong', { text: match[2] }));
+      cursor = match.index + match[0].length;
+    }
+    if (cursor < source.length) frag.append(source.slice(cursor));
+    return frag;
+  }
+
+  /** A paragraph of inline-formatted text. */
+  const para = (source) => el('p', {}, [rich(source)]);
+
+  /** A model-tier pill. The label carries the meaning; colour only reinforces it. */
+  const tierPill = (tier) => el('span', { class: 'tier', data: { tier }, text: tier });
+
+  /** `document.getElementById`, with a loud failure if the id is wrong. */
+  function byId(id) {
+    const node = document.getElementById(id);
+    if (!node) throw new Error(`Simba: missing element #${id}`);
+    return node;
+  }
+
+  /* --------------------------------------------------------------------------
+     4. Environment and storage
+     ----------------------------------------------------------------------- */
+
+  const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
+
+  /** True when the reader has not asked for reduced motion. */
+  const animates = () => !motionQuery.matches;
+
+  /**
+   * localStorage that cannot throw. Private windows, blocked site data and
+   * sandboxed previews all fail on access, so every call is guarded and the
+   * interface works identically when storage is unavailable.
+   */
+  const store = {
+    get(key) { try { return localStorage.getItem(key); } catch { return null; } },
+    set(key, value) { try { localStorage.setItem(key, value); } catch { /* non-fatal */ } },
+  };
+
+  const THEME_KEY = 'simba.theme';
+
+  /** Pause, unless the reader asked for reduced motion or we are replaying. */
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, animates() ? ms : 0));
+
+  /** `hh:mm`, for approval timestamps. */
+  const clockTime = () =>
+    new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+
+  /* --------------------------------------------------------------------------
+     5. State
+     Small enough to hold in one object, which keeps every read in one place.
+     ----------------------------------------------------------------------- */
+  const state = {
+    depth: 'auto',            // 'fast' | 'auto' | 'deep'
+    busy: false,              // a run holds the composer
+    /* Why the composer is held, so the reader is never blocked without being
+       told: 'idle' | 'thinking' | 'awaiting-approval' | 'executing'. */
+    phase: 'idle',
+    attachment: null,         // filename of a dropped mockup or screenshot, if any
+    listening: false,         // voice input is armed
+    lastFocus: null,          // element to restore focus to after the drawer closes
+  };
+
+  const dom = {
+    rail: byId('rail'),
+    scrim: byId('scrim'),
+    menuToggle: byId('menu-toggle'),
+    themeToggle: byId('theme-toggle'),
+    themeIcon: byId('theme-icon'),
+    threadList: byId('thread-list'),
+    repoName: byId('repo-name'),
+    repoStats: byId('repo-stats'),
+    ctx: byId('ctx'),
+    crumb: byId('crumb'),
+    stream: byId('stream'),
+    conversation: byId('conversation'),
+    streamNote: byId('stream-note'),
+    composer: byId('composer'),
+    input: byId('composer-input'),
+    send: byId('send'),
+    depthGroup: byId('depth'),
+    attachment: byId('attachment'),
+    attachmentName: byId('attachment-name'),
+    announcer: byId('announcer'),
+    newTask: byId('new-task'),
+  };
+
+  /** Announce a state change that sighted readers perceive visually. */
+  function announce(message) {
+    dom.announcer.textContent = message;
+  }
+
+  function scrollToLatest() {
+    dom.stream.scrollTop = dom.stream.scrollHeight;
+  }
+
+  /* --------------------------------------------------------------------------
+     6. Renderers
+     Each returns a detached node from data alone: no reads of the document, no
+     side effects. That is what lets the boot replay reuse them unchanged.
+     ----------------------------------------------------------------------- */
+
+  /** A card: the shared shell for every agent artefact. */
+  function card({ iconName, title, meta, kind }, body = []) {
+    return el('section', { class: 'card', data: { kind } }, [
+      el('h3', { class: 'card-head' }, [
+        icon(iconName),
+        el('span', { class: 'grow', text: title }),
+        meta ? el('span', { class: 'ms', text: meta }) : null,
+      ]),
+      ...body,
+    ]);
+  }
+
+  /** The card footer: available actions, and the guarantee they carry. */
+  function gate(note, buttons = []) {
+    return el('div', { class: 'gate' }, [
+      el('p', { class: 'gate-note', text: note }),
+      ...buttons,
+    ]);
+  }
+
+  function button(label, { variant, onClick, small } = {}) {
+    return el('button', {
+      class: small ? 'btn-sm' : 'btn',
+      type: 'button',
+      data: { variant },
+      text: label,
+      on: { click: onClick },
+    });
+  }
+
+  /** Replace a card's footer with its terminal outcome. */
+  function settle(cardNode, message, kind = 'good') {
+    const foot = cardNode.querySelector('.gate');
+    if (!foot) return;
+    foot.replaceWith(el('p', { class: 'outcome fade-in', data: { kind } }, [
+      icon('check', 11, 3.2), message,
+    ]));
+  }
+
+  /** The routing trace, or the pre-flight context read. Always visible. */
+  function traceCard(title, iconName, rows) {
+    return el('section', { class: 'trace' }, [
+      el('h3', { class: 'trace-head' }, [icon(iconName), title]),
+      el('div', { class: 'trace-rows' }, rows.map(([label, tier, ms]) =>
+        el('div', { class: 'trace-row' }, [
+          el('span', {}, [rich(label)]),
+          tierPill(tier),
+          el('span', { class: 'ms', text: ms }),
+        ]))),
+    ]);
+  }
+
+  /**
+   * The plan. Renders every step as `pending`; the runtime advances the states.
+   * @returns {{node: HTMLElement, steps: HTMLElement[]}}
+   */
+  function planCard(plan) {
+    const steps = plan.steps.map((step, index) =>
+      el('li', { class: 'plan-step', data: { state: 'pending', index } }, [
+        el('span', { class: 'step-box' }, [icon('check', 11, 3.2)]),
+        el('span', {}, [
+          el('span', { class: 'step-title', text: step.title }),
+          el('span', { class: 'step-detail', text: step.detail }),
+        ]),
+        el('span', { class: 'step-right' }, [
+          tierPill(step.tier),
+          el('span', { class: 'ms' }),
+        ]),
+      ]));
+
+    const node = card(
+      { iconName: 'plan', title: `Plan · ${plan.steps.length} steps`, meta: `est. ${plan.estimate}` },
+      [el('ol', { class: 'plan-steps' }, steps)]
+    );
+    return { node, steps };
+  }
+
+  /** One row of the test loop. */
+  function loopRow({ kind, attempt, verdict, rest, ms }) {
+    return el('div', { class: 'loop-row fade-in', data: { kind } }, [
+      el('span', { class: 'attempt', text: attempt }),
+      el('span', {}, [el('b', { class: 'verdict', text: verdict }), ' ', rich(rest || '')]),
+      el('span', { class: 'ms', text: ms }),
+    ]);
+  }
+
+  /** Real test output, rendered as text so it can never be markup. */
+  function logBlock(lines) {
+    return el('pre', { class: 'log fade-in' }, lines.map(([tone, text], i) =>
+      el('span', { class: tone ? `log-${tone}` : null, text: text + (i < lines.length - 1 ? '\n' : '') })));
+  }
+
+  /** A single file in the diff, with its own apply / discard controls. */
+  function diffFile(file) {
+    const row = el('div', { class: 'diff-file', data: { discarded: 'false' } }, [
+      el('span', { class: 'diff-path', text: file.path }),
+      el('span', { class: 'diff-add', text: `+${file.added}` }),
+      el('span', { class: 'diff-del', text: `−${file.removed}` }),
+    ]);
+
+    const hunk = file.hunk
+      ? el('pre', { class: 'diff-body' }, file.hunk.map(([op, text]) =>
+          el('span', { class: 'diff-line', data: { op }, text: text + '\n' })))
+      : null;
+
+    const apply = button('Apply', { small: true, onClick: () => {
+      apply.textContent = 'Applied';
+      apply.disabled = true;
+      discard.disabled = true;
+      announce(`Applied ${file.path}`);
+    } });
+
+    const discard = button('Discard', { small: true, onClick: () => {
+      row.dataset.discarded = 'true';
+      if (hunk) hunk.remove();
+      discard.textContent = 'Discarded';
+      discard.disabled = true;
+      apply.disabled = true;
+      announce(`Discarded ${file.path}`);
+    } });
+
+    row.append(apply, discard);
+    return [row, hunk];
+  }
+
+  function diffCard() {
+    const node = card(
+      { iconName: 'diff', title: 'Changes · nothing written yet', meta: `${DATA.diff.fileCount} files` },
+      DATA.diff.files.flatMap(diffFile).filter(Boolean)
+    );
+
+    node.append(gate(
+      'Reviewed as a diff and applied per file. Nothing is ever copied out of the conversation.',
+      [
+        button('Discard all', { onClick: () => {
+          settle(node, 'Discarded. Your working tree is untouched.', 'neutral');
+          announce('All changes discarded.');
+        } }),
+        button(`Apply all ${DATA.diff.fileCount} files`, { variant: 'primary', onClick: () => {
+          settle(node, `Applied to ${DATA.diff.fileCount} files. Every step is still individually reversible.`);
+          announce('All changes applied.');
+        } }),
+      ]
+    ));
+    return node;
+  }
+
+  function graphCard() {
+    const node = card(
+      { iconName: 'graph', title: 'Blast radius · from the syntax tree, not a text search', meta: `${DATA.graph.total} refs` },
+      DATA.graph.rows.map((row) =>
+        el('div', { class: 'graph-row' }, [
+          el('span', { class: 'graph-ref' }, [
+            el('b', { text: row.file }),
+            row.symbol ? ` → ${row.symbol}` : '',
+            row.at ? el('span', { class: 'at', text: ' ' + row.at }) : null,
+          ]),
+          el('span', { class: 'tag', data: { tone: row.tone }, text: row.tag }),
+        ]))
+    );
+    node.append(gate('A similarity search over file text finds none of this. A dependency graph does.'));
+    return node;
+  }
+
+  function sourcesCard(depth) {
+    const visible = DATA.sources.filter((s) => !s.deepOnly || depth !== 'fast');
+    const confidence = depth === 'fast' ? DATA.confidence.low : DATA.confidence.high;
+
+    const node = card(
+      { iconName: 'doc', title: 'What I read to answer this', meta: `${visible.length} sources` },
+      visible.map((source) => {
+        const row = el('button', { class: 'source', type: 'button' }, [
+          icon('doc', 12, 2.2),
+          el('span', { class: 'source-path' }, [
+            source.path,
+            source.at ? el('span', { class: 'at', text: source.at }) : null,
+          ]),
+          el('span', { class: 'source-why', text: source.why }),
+        ]);
+        row.addEventListener('click', () => {
+          announce(`Would open ${source.path} at that line.`);
+          row.after(el('p', { class: 'outcome fade-in' }, [
+            icon('check', 11, 3.2),
+            `Would open ${source.path}${source.at} in your editor.`,
+          ]));
+          row.disabled = true;
+        });
+        return row;
+      })
+    );
+
+    node.append(el('p', { class: 'confidence', data: { level: confidence.level } }, [
+      'Confidence',
+      el('span', {
+        class: 'meter',
+        role: 'img',
+        aria: { label: `Confidence ${confidence.label}, ${confidence.percent} percent` },
+      }, [el('span', { class: 'meter-fill', style: `width:${confidence.percent}%` })]),
+      el('b', { text: confidence.label }),
+      el('span', { class: 'confidence-reason', text: confidence.reason }),
+    ]));
+
+    return node;
+  }
+
+  function guardCard() {
+    const node = card(
+      { iconName: 'shield', title: 'Destructive operation · stopped', kind: 'guard' },
+      [el('div', { class: 'card-text' }, [
+        para('That request would remove data or rewrite history, so I stopped before touching anything. Here is exactly what it would affect:'),
+        el('ul', { class: 'guard-list' }, DATA.guard.impact.map((line) => el('li', { text: line }))),
+      ])]
+    );
+
+    node.append(gate(
+      'This gate is never remembered. Every destructive action asks again, every time.',
+      [
+        button('Cancel', { onClick: () => {
+          settle(node, 'Cancelled. Nothing was touched.', 'neutral');
+          announce('Cancelled.');
+        } }),
+        button('Suggest a reversible version', { variant: 'primary', onClick: () => {
+          settle(node, 'Rewritten as a reversible soft-delete with a 30-day purge job. Ask me to plan it.');
+          announce('A reversible alternative was suggested.');
+        } }),
+      ]
+    ));
+    return node;
+  }
+
+  /* --------------------------------------------------------------------------
+     7. Agent runtime
+     The loop is: read context -> plan -> WAIT for approval -> execute step by
+     step -> test and self-correct -> present the diff, the blast radius and the
+     citations. Every `await` marks where a real backend call belongs.
+     ----------------------------------------------------------------------- */
+
+  /** Add a conversation turn and return its body, which renderers append into. */
+  function addTurn(author, name, children = []) {
+    const body = el('div', { class: 'turn-body' }, [
+      el('p', { class: 'turn-who', text: name }),
+      ...children,
+    ]);
+
+    dom.conversation.append(el('article', { class: 'turn fade-in', data: { author } }, [
+      el('span', { class: 'turn-mark', 'aria-hidden': 'true', text: author === 'human' ? 'CS' : 'S' }),
+      body,
+    ]));
+    scrollToLatest();
+    return body;
+  }
+
+  /** Append to a turn and keep the newest content in view. */
+  function emit(body, node) {
+    body.append(node);
+    scrollToLatest();
+    return node;
+  }
+
+  /**
+   * Present the plan and block until the reader decides what to do with it.
+   * Resolves with the approved plan, or `null` if every step was dropped.
+   *
+   * This is the approval checkpoint: no step runs before it settles.
+   */
+  function awaitApproval(body, plan, { replay }) {
+    const { node, steps } = planCard(plan);
+    const runtimePlan = { ...plan, steps: plan.steps.slice() };
+
+    return new Promise((resolve) => {
+      const footer = () => node.querySelector('.gate');
+
+      /**
+       * Approve the whole plan: replace the footer with the approval record and
+       * hand back a `waitForStep` that never blocks.
+       */
+      const approveAll = () => {
+        footer().replaceWith(el('p', { class: 'gate' }, [
+          el('span', {
+            class: 'gate-note',
+            text: `Approved at ${clockTime()} \u00b7 running ${runtimePlan.steps.length} steps. Each one is individually reversible.`,
+          }),
+        ]));
+        announce('Plan approved. Running every step.');
+        resolve({ plan: runtimePlan, steps, waitForStep: () => Promise.resolve() });
+      };
+
+      /**
+       * Step-through: the footer keeps one button, and `waitForStep` resolves
+       * only when the reader presses it. Each step is its own checkpoint.
+       */
+      const approveStepwise = () => {
+        let release = null;
+        const next = button('Run step 1', { variant: 'primary', onClick: () => {
+          next.disabled = true;
+          if (release) { const go = release; release = null; go(); }
+        } });
+
+        footer().replaceWith(el('p', { class: 'gate' }, [
+          el('span', { class: 'gate-note', text: 'Step-through mode \u00b7 you approve each step as it comes.' }),
+          next,
+        ]));
+        announce('Step-through mode. Approve each step individually.');
+
+        const waitForStep = (index) => new Promise((go) => {
+          if (index >= runtimePlan.steps.length) { go(); return; }
+          next.textContent = `Run step ${index + 1}`;
+          next.disabled = false;
+          release = () => {
+            if (index === runtimePlan.steps.length - 1) {
+              next.replaceWith(el('span', { class: 'ms', text: 'all steps approved' }));
+            }
+            go();
+          };
+        });
+
+        resolve({ plan: runtimePlan, steps, waitForStep });
+      };
+
+      if (replay) {
+        // Boot replay: the sample task was approved before this session began.
+        node.append(gate(''));
+        node.querySelector('.gate').replaceWith(el('p', { class: 'gate' }, [
+          el('span', { class: 'gate-note', text: `You approved all ${plan.steps.length} steps at 10:41. Each one is individually reversible.` }),
+        ]));
+        emit(body, node);
+        resolve({ plan: runtimePlan, steps, waitForStep: () => Promise.resolve() });
+        return;
+      }
+
+      const dropLast = button('Drop last step', { onClick: () => {
+        const last = steps[steps.length - 1];
+        last.dataset.state = 'dropped';
+        runtimePlan.steps = runtimePlan.steps.slice(0, -1);
+        runtimePlan.runsTests = false;
+        dropLast.disabled = true;
+        announce('Last step dropped from the plan.');
+      } });
+
+      node.append(gate(
+        'Nothing runs until you say so. Approve the whole plan, walk it one step at a time, or drop a step.',
+        [
+          dropLast,
+          button('Step through', { onClick: approveStepwise }),
+          button('Approve plan', { variant: 'primary', onClick: approveAll }),
+        ]
+      ));
+
+      emit(body, node);
+      announce(`Simba proposed a ${plan.steps.length}-step plan and is waiting for your approval.`);
+    });
+  }
+
+  /** Move one step through pending -> running -> done. */
+  async function executeStep(stepNodes, plan, index, { replay }) {
+    const node = stepNodes[index];
+    const step = plan.steps[index];
+    if (!node || !step) return;
+
+    const readout = node.querySelector('.ms');
+    node.dataset.state = 'running';
+    readout.replaceChildren(el('span', { class: 'spin' }));
+
+    await sleep(replay ? 0 : 700);
+
+    node.dataset.state = 'done';
+    readout.replaceChildren(document.createTextNode(step.ms));
+    scrollToLatest();
+  }
+
+  /**
+   * Run the suite, read the failure, patch it, run again.
+   * The first attempt fails deliberately — a loop that only ever passes proves
+   * nothing about the agent's ability to recover.
+   */
+  async function runTestLoop(body, { replay }) {
+    const verdict = el('span', { class: 'tier', data: { tier: 'super' }, text: 'running' });
+    const loop = el('div', { class: 'loop' });
+
+    const node = card({ iconName: 'loop', title: 'Running your test suite' }, [loop]);
+    node.querySelector('.card-head').append(verdict);
+    emit(body, node);
+
+    for (const entry of DATA.testRun) {
+      await sleep(replay ? 0 : 900);
+      loop.append(loopRow(entry));
+      if (entry.log) loop.append(logBlock(entry.log));
+      scrollToLatest();
+    }
+
+    verdict.dataset.tier = 'nano';
+    verdict.textContent = 'green';
+    node.append(gate('You are seeing code that already survived your suite — not a first draft.'));
+    announce('Tests failed once, Simba patched itself, and the suite is now green.');
+    scrollToLatest();
+  }
+
+  /**
+   * One full agent run.
+   * @param {Object} options
+   * @param {string} options.text        what the reader asked for
+   * @param {string} options.depth       'fast' | 'auto' | 'deep'
+   * @param {string|null} options.attachment
+   * @param {boolean} [options.replay]   render the sample run with no delays
+   */
+  async function runTask({ text, depth, attachment, replay = false }) {
+    setPhase('thinking');
+
+    // The reader's turn. `el` sets textContent, so markup in `text` stays text.
+    addTurn('human', 'Chaitanya', [
+      el('p', { text }),
+      attachment ? el('p', { class: 'ms', text: `attached: ${attachment}` }) : null,
+    ].filter(Boolean));
+
+    const body = addTurn('agent', 'Simba');
+
+    try {
+      // A destructive request stops here, before any planning happens.
+      if (DESTRUCTIVE.test(text) && !NOT_DESTRUCTIVE.test(text)) {
+        await sleep(replay ? 0 : 400);
+        emit(body, para('I checked the graph before acting on this, and then I stopped.'));
+        emit(body, guardCard());
+        announce('Simba refused a destructive request and is asking for confirmation.');
+        return;
+      }
+
+      // 1. What the agent already knew, before it was told anything.
+      await sleep(replay ? 0 : 300);
+      emit(body, traceCard('Context I already had', 'eye', DATA.preflight));
+
+      // 2. How the request itself was routed.
+      await sleep(replay ? 0 : 400);
+      emit(body, traceCard('How this was routed', 'trace', [
+        ['Classify the request', 'nano', '170 ms'],
+        ['Resolve every reference to `User`', 'nano', '310 ms'],
+        ['Plan the change and order the steps', 'ultra', '6.9 s'],
+      ]));
+
+      if (attachment) {
+        emit(body, para(`I read \`${attachment}\` and matched it against your existing components before planning.`));
+      }
+
+      emit(body, para(
+        `Graph walked before planning: **${DATA.graph.total} references**, of which **11 read rows** ` +
+        'and would have leaked deleted records. This is the order I would do it in.'
+      ));
+
+      // 3. The approval checkpoint. Nothing below runs until it settles.
+      const plan = DATA.plans[depth];
+      setPhase('awaiting-approval');
+      const approved = await awaitApproval(body, plan, { replay });
+      if (!approved || approved.plan.steps.length === 0) return;
+
+      // 4. Execute, sequentially, reporting each step as it completes.
+      for (let i = 0; i < approved.plan.steps.length; i += 1) {
+        setPhase('awaiting-approval');
+        await approved.waitForStep(i);          // the per-step checkpoint
+        setPhase('executing');
+        await executeStep(approved.steps, approved.plan, i, { replay });
+      }
+
+      // 5. Test and self-correct.
+      if (approved.plan.runsTests) {
+        await runTestLoop(body, { replay });
+      }
+
+      // 6. Present the result: the diff, the blast radius, the citations.
+      await sleep(replay ? 0 : 400);
+      emit(body, diffCard());
+      await sleep(replay ? 0 : 300);
+      emit(body, graphCard());
+      await sleep(replay ? 0 : 300);
+      emit(body, sourcesCard(depth));
+      emit(body, para(DATA.closing));
+
+      announce('Run complete. Changes are proposed but not written.');
+    } catch (error) {
+      // A failure in the agent is reported in the conversation, not swallowed
+      // into the console where the reader will never look for it.
+      emit(body, el('p', { class: 'outcome', data: { kind: 'neutral' } }, [
+        icon('shield', 11, 2.4),
+        'The run stopped before finishing and nothing was written. Details are in the console.',
+      ]));
+      announce('The run failed. Nothing was written.');
+      console.error('Simba run failed:', error);
+    } finally {
+      setPhase('idle');
+    }
+  }
+
+  /* --------------------------------------------------------------------------
+     8. Interface wiring
+     ----------------------------------------------------------------------- */
+
+  /* ---- theme ------------------------------------------------------------ */
+
+  /** True when dark is active, whether by choice or by system preference. */
+  function isDark() {
+    const chosen = document.documentElement.dataset.theme;
+    return chosen ? chosen === 'dark' : darkQuery.matches;
+  }
+
+  /** The toggle shows the theme it will switch *to*, and says so out loud. */
+  function paintThemeToggle() {
+    const goingDark = !isDark();
+    dom.themeIcon.replaceChildren(icon(goingDark ? 'moon' : 'sun', 16, 1.8));
+    dom.themeToggle.setAttribute('aria-label', `Switch to ${goingDark ? 'dark' : 'light'} theme`);
+  }
+
+  function initTheme() {
+    const saved = store.get(THEME_KEY);
+    if (saved === 'dark' || saved === 'light') document.documentElement.dataset.theme = saved;
+    paintThemeToggle();
+
+    dom.themeToggle.addEventListener('click', () => {
+      const next = isDark() ? 'light' : 'dark';
+      document.documentElement.dataset.theme = next;
+      store.set(THEME_KEY, next);
+      paintThemeToggle();
+      announce(`${next === 'dark' ? 'Dark' : 'Light'} theme.`);
+    });
+
+    // Follow the system if the reader never chose explicitly.
+    darkQuery.addEventListener('change', () => {
+      if (!document.documentElement.dataset.theme) paintThemeToggle();
+    });
+  }
+
+  /* ---- drawer ---------------------------------------------------------- */
+
+  function setDrawer(open) {
+    dom.rail.dataset.open = String(open);
+    dom.scrim.dataset.on = String(open);
+    dom.menuToggle.setAttribute('aria-expanded', String(open));
+
+    if (open) {
+      state.lastFocus = document.activeElement;
+      dom.rail.querySelector('.thread')?.focus();
+    } else if (state.lastFocus instanceof HTMLElement) {
+      state.lastFocus.focus();
+      state.lastFocus = null;
+    }
+  }
+
+  function initDrawer() {
+    dom.menuToggle.addEventListener('click', () => setDrawer(dom.rail.dataset.open !== 'true'));
+    dom.scrim.addEventListener('click', () => setDrawer(false));
+  }
+
+  /* ---- sidebar content, rendered from DATA ----------------------------- */
+
+  function renderSidebar() {
+    dom.repoName.textContent = DATA.repo.name;
+    dom.repoStats.replaceChildren(...DATA.repo.stats.flatMap(([label, value]) => [
+      el('div', { class: 'repo-stat' }, [
+        el('dt', { text: label }),
+        el('dd', { text: value }),
+      ]),
+    ]));
+
+    dom.threadList.replaceChildren(...DATA.threads.flatMap((group, groupIndex) => [
+      el('p', { class: 'rail-group-label', text: group.group }),
+      ...group.items.map((title, itemIndex) => {
+        const current = groupIndex === 0 && itemIndex === 0;
+        return el('button', {
+          class: 'thread',
+          type: 'button',
+          text: title,
+          aria: { current: current ? 'true' : null },
+          on: { click: (event) => selectThread(event.currentTarget, title) },
+        });
+      }),
+    ]));
+  }
+
+  function selectThread(node, title) {
+    for (const other of dom.threadList.querySelectorAll('.thread')) other.removeAttribute('aria-current');
+    node.setAttribute('aria-current', 'true');
+    dom.crumb.replaceChildren(el('strong', { text: title }));
+    setDrawer(false);
+  }
+
+  /* ---- live context strip ---------------------------------------------- */
+
+  function renderContext() {
+    const pills = DATA.context.map((item) =>
+      el('p', { class: 'ctx-pill', data: { tone: item.tone } }, [
+        icon(item.icon, 11),
+        `${item.label} `,
+        el('b', { class: item.mono ? 'mono' : null, text: item.value }),
+      ]));
+
+    const note = el('p', { class: 'ctx-note fade-in', text: DATA.contextNote, hidden: true });
+
+    const toggle = el('button', {
+      class: 'ctx-toggle',
+      type: 'button',
+      text: 'what this means',
+      aria: { expanded: 'false' },
+      on: { click: () => {
+        const open = toggle.getAttribute('aria-expanded') === 'true';
+        toggle.setAttribute('aria-expanded', String(!open));
+        toggle.textContent = open ? 'what this means' : 'hide';
+        note.hidden = open;
+      } },
+    });
+
+    dom.ctx.append(...pills, toggle, note);
+  }
+
+  /* ---- composer -------------------------------------------------------- */
+
+  /** What the composer says while it is held, keyed by the reason it is held. */
+  const PLACEHOLDERS = {
+    'idle': 'Describe a task \u2014 Simba will plan it first\u2026',
+    'thinking': 'Reading your context\u2026',
+    'awaiting-approval': 'Approve, step through or drop the plan above to continue\u2026',
+    'executing': 'Running the approved plan\u2026',
+  };
+
+  /**
+   * Single place where composer state is derived. A disabled input always
+   * carries the reason it is disabled, so the reader is never silently locked
+   * out while the agent waits on them.
+   */
+  function syncComposer() {
+    dom.input.style.height = 'auto';
+    dom.input.style.height = `${Math.min(dom.input.scrollHeight, 150)}px`;
+    dom.input.disabled = state.busy;
+    dom.send.disabled = state.busy || dom.input.value.trim() === '';
+    if (!state.listening) dom.input.placeholder = PLACEHOLDERS[state.phase] ?? PLACEHOLDERS.idle;
+  }
+
+  /** Move to a new phase and reflect it in the composer immediately. */
+  function setPhase(phase) {
+    state.phase = phase;
+    state.busy = phase !== 'idle';
+    syncComposer();
+  }
+
+  function setAttachment(name) {
+    state.attachment = name;
+    dom.attachmentName.textContent = name ?? '';
+    dom.attachment.hidden = !name;
+  }
+
+  function initComposer() {
+    dom.input.addEventListener('input', syncComposer);
+
+    // Enter sends; Shift+Enter is a newline. The form's submit event owns the
+    // actual send, so the keyboard and the button cannot diverge.
+    dom.input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        dom.composer.requestSubmit();
+      }
+    });
+
+    dom.composer.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const text = dom.input.value.trim();
+      if (!text || state.busy) return;
+
+      const attachment = state.attachment;
+      dom.input.value = '';
+      setAttachment(null);
+      dom.streamNote.hidden = true;
+      syncComposer();
+
+      runTask({ text, depth: state.depth, attachment });
+    });
+
+    dom.depthGroup.addEventListener('click', (event) => {
+      const chosen = event.target.closest('button[data-depth]');
+      if (!chosen) return;
+      state.depth = chosen.dataset.depth;
+      for (const option of dom.depthGroup.querySelectorAll('button')) {
+        option.setAttribute('aria-pressed', String(option === chosen));
+      }
+      announce(`${chosen.textContent} depth.`);
+    });
+
+    byId('attachment-clear').addEventListener('click', () => setAttachment(null));
+  }
+
+  /* ---- multimodal input ------------------------------------------------ */
+
+  function initMultimodal() {
+    byId('tool-attach').addEventListener('click', () => {
+      setAttachment('login-mockup.png');
+      if (!dom.input.value) dom.input.value = 'Build this screen to match our design system.';
+      syncComposer();
+      dom.input.focus();
+      announce('Mockup attached.');
+    });
+
+    // Real drag and drop: the filename comes from the dropped file, and the
+    // file itself is never read, so nothing leaves the page.
+    for (const type of ['dragenter', 'dragover']) {
+      dom.composer.addEventListener(type, (event) => {
+        event.preventDefault();
+        dom.composer.dataset.dragging = 'true';
+      });
+    }
+    for (const type of ['dragleave', 'drop']) {
+      dom.composer.addEventListener(type, (event) => {
+        event.preventDefault();
+        dom.composer.dataset.dragging = 'false';
+      });
+    }
+    dom.composer.addEventListener('drop', (event) => {
+      const file = event.dataTransfer?.files?.[0];
+      setAttachment(file ? file.name : 'dropped-image.png');
+      dom.input.focus();
+      announce('File attached.');
+    });
+
+    const voice = byId('tool-voice');
+    voice.addEventListener('click', () => {
+      state.listening = !state.listening;
+      voice.setAttribute('aria-pressed', String(state.listening));
+
+      if (!state.listening) {
+        syncComposer();
+        return;
+      }
+
+      dom.input.placeholder = 'Listening — say what you need…';
+      announce('Listening.');
+      setTimeout(() => {
+        if (!state.listening) return;
+        state.listening = false;
+        voice.setAttribute('aria-pressed', 'false');
+        dom.input.value = 'Why does the nightly export job time out?';
+        syncComposer();
+        dom.input.focus();
+      }, animates() ? 1400 : 0);
+    });
+
+    // The last terminal failure is already in context, so it is one click, not
+    // a paste.
+    byId('tool-terminal').addEventListener('click', () => {
+      dom.input.value =
+        "Fix this: TypeError: Cannot read properties of null (reading 'deletedAt') " +
+        'at exportUsers (src/api/export.ts:17)';
+      syncComposer();
+      dom.input.focus();
+      announce('Last terminal error loaded.');
+    });
+  }
+
+  /* ---- empty state ----------------------------------------------------- */
+
+  function showWelcome() {
+    dom.conversation.replaceChildren(el('div', { class: 'welcome fade-in' }, [
+      el('h1', { text: 'What are we building?' }),
+      el('p', { text: 'Simba plans before it acts, runs your tests before it answers, and cites every file it read. It already knows your branch, your diff and your last error.' }),
+      el('div', { class: 'starters' }, DATA.starters.map(([title, detail]) =>
+        el('button', {
+          class: 'starter',
+          type: 'button',
+          on: { click: () => {
+            dom.input.value = title;
+            syncComposer();
+            dom.input.focus();
+          } },
+        }, [title, el('span', { text: detail })]))),
+    ]));
+
+    dom.crumb.replaceChildren(el('strong', { text: 'New task' }));
+    dom.streamNote.hidden = true;
+    setDrawer(false);
+    dom.input.focus();
+  }
+
+  /* ---- keyboard -------------------------------------------------------- */
+
+  function initKeyboard() {
+    document.addEventListener('keydown', (event) => {
+      // Escape closes the drawer and returns focus where it came from.
+      if (event.key === 'Escape' && dom.rail.dataset.open === 'true') {
+        setDrawer(false);
+        return;
+      }
+      // Cmd/Ctrl+K jumps to the composer from anywhere.
+      if (event.key.toLowerCase() === 'k' && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault();
+        dom.input.focus();
+      }
+    });
+  }
+
+  /* --------------------------------------------------------------------------
+     9. Boot
+     The sample conversation is not authored markup: it is a real run of the
+     agent loop with the delays removed. One code path, one place to change.
+     ----------------------------------------------------------------------- */
+  /**
+   * Fill every `[data-icon]` placeholder in the authored markup with a real
+   * SVG. The markup names the icon; the script owns the drawing, so the two
+   * never drift apart.
+   */
+  function hydrateIcons(root = document) {
+    for (const slot of root.querySelectorAll('[data-icon]')) {
+      const size = Number(slot.dataset.iconSize) || 15;
+      const weight = Number(slot.dataset.iconWeight) || 2;
+      slot.replaceChildren(icon(slot.dataset.icon, size, weight));
+    }
+  }
+
+  function boot() {
+    hydrateIcons();
+    renderSidebar();
+    renderContext();
+    initTheme();
+    initDrawer();
+    initComposer();
+    initMultimodal();
+    initKeyboard();
+
+    dom.newTask.addEventListener('click', showWelcome);
+
+    // Replay the sample task through the live runtime.
+    runTask({ text: SAMPLE_TASK, depth: 'auto', attachment: null, replay: true })
+      .then(() => { dom.stream.scrollTop = 0; });
+
+    syncComposer();
+  }
+
+  boot();
+})();
+</script>
+</body>
+</html>
